@@ -1,0 +1,3 @@
+%{
+  "vector": {:hex, :vector, "1.0.1", "587fdc3866a224c359df80b5f59f403ac38817f9f60d4076fd0d1128028ea4cd", [:mix], [], "hexpm", "28d6fd19e4b2ed1a39efa67ae5aaecf813c04a77db19d93b767bd347736ec9ea"},
+}

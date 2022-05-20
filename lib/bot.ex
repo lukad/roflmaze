@@ -10,7 +10,7 @@ defmodule Bot do
       goal: {0, 0},
       pos: {0, 0},
       walls: {true, true, true, true},
-      dir: :north
+      dir: "up"
     })
   end
 
@@ -22,7 +22,7 @@ defmodule Bot do
 
   @impl true
   def handle_info({:tcp, port, message}, state) do
-    Logger.info("Received: #{message}")
+    Logger.info("Received: #{message}" |> String.trim_trailing())
     handle_message(port, message, state)
   end
 
@@ -37,13 +37,11 @@ defmodule Bot do
 
   defp handle_message(port, <<"pos|", numbers::binary>>, %Bot{dir: dir} = state) do
     {pos, walls} = parse_pos(numbers)
-    state = %Bot{state | pos: pos, walls: walls}
 
-    {move, dir} = next_move(dir, walls)
-    Logger.info("Dir #{state.dir}")
-    state = %Bot{state | dir: dir}
-    Logger.info("Moving #{move}")
-    :ok = :gen_tcp.send(port, "move|#{move}\n")
+    new_dir = next_move(dir, walls)
+    state = %Bot{state | pos: pos, dir: new_dir, walls: walls}
+    Logger.info("Moving #{new_dir}")
+    :ok = :gen_tcp.send(port, "move|#{new_dir}\n")
 
     {:noreply, state}
   end
@@ -53,39 +51,32 @@ defmodule Bot do
     {:noreply, %Bot{state | goal: {x, y}}}
   end
 
-  defp handle_message(_port, msg, state) do
-    Logger.info("Unhandled: #{msg}")
-    {:noreply, state}
-  end
-
   defp parse_pos(numbers) do
-    foo = [x, y, n, e, a, d] = numbers |> String.split("|") |> Enum.map(&to_int/1)
+    [x, y, n, e, a, d] = numbers |> String.split("|") |> Enum.map(&to_int/1)
     pos = {x, y}
     walls = {n != 1, e != 1, a != 1, d != 1}
-    Logger.warn(foo |> inspect())
-    Logger.warn(walls |> inspect())
     {pos, walls}
   end
 
-  defp next_move(:north, {_, true, _, _}), do: {"right", :east}
-  defp next_move(:north, {false, _, _, true}), do: {"left", :west}
-  defp next_move(:north, {false, _, true, _}), do: {"down", :south}
-  defp next_move(:north, _), do: {"up", :north}
+  defp next_move("up", {_, _, _, true}), do: "left"
+  defp next_move("up", {false, true, _, _}), do: "right"
+  defp next_move("up", {false, _, true, _}), do: "down"
+  defp next_move("up", _), do: "up"
 
-  defp next_move(:east, {_, _, true, _}), do: {"down", :south}
-  defp next_move(:east, {true, false, _, _}), do: {"up", :north}
-  defp next_move(:east, {_, false, _, true}), do: {"left", :west}
-  defp next_move(:east, _), do: {"right", :east}
+  defp next_move("right", {true, _, _, _}), do: "up"
+  defp next_move("right", {_, false, true, _}), do: "down"
+  defp next_move("right", {_, false, _, true}), do: "left"
+  defp next_move("right", _), do: "right"
 
-  defp next_move(:south, {_, _, _, true}), do: {"left", :west}
-  defp next_move(:south, {_, true, false, _}), do: {"right", :east}
-  defp next_move(:south, {true, _, false, _}), do: {"up", :north}
-  defp next_move(:south, _), do: {"down", :south}
+  defp next_move("down", {_, true, _, _}), do: "right"
+  defp next_move("down", {_, _, false, true}), do: "left"
+  defp next_move("down", {true, _, false, _}), do: "up"
+  defp next_move("down", _), do: "down"
 
-  defp next_move(:west, {true, _, _, _}), do: {"up", :north}
-  defp next_move(:west, {_, _, true, false}), do: {"down", :south}
-  defp next_move(:west, {_, true, _, false}), do: {"right", :east}
-  defp next_move(:west, _), do: {"left", :west}
+  defp next_move("left", {_, _, true, _}), do: "down"
+  defp next_move("left", {true, _, _, false}), do: "up"
+  defp next_move("left", {_, true, _, false}), do: "right"
+  defp next_move("left", _), do: "left"
 
   defp to_int(s), do: s |> Integer.parse() |> elem(0)
 end

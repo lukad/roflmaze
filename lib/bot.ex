@@ -18,7 +18,9 @@ defmodule Bot do
 
   @impl true
   def init(%Bot{} = state) do
-    {:ok, _} = :gen_tcp.connect('gpn-mazing.v6.rocks', 4000, [:binary, :inet6])
+    host = Application.get_env(:bot, :host) |> to_charlist()
+    {port, _} = Application.get_env(:bot, :port) |> Integer.parse()
+    {:ok, _} = :gen_tcp.connect(host, port, [:binary, :inet6])
     {:ok, state}
   end
 

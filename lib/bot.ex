@@ -1,7 +1,7 @@
 defmodule Bot do
   use GenServer
 
-  defstruct [:goal, :pos, :walls, :dir]
+  defstruct [:goal, :pos, :walls, :visited, :moves, :backtracking]
 
   require Logger
 
@@ -9,21 +9,29 @@ defmodule Bot do
     GenServer.start_link(__MODULE__, %Bot{
       goal: {0, 0},
       pos: {0, 0},
-      walls: {true, true, true, true},
-      dir: "up"
+      walls: {false, false, false, false},
+      visited: MapSet.new(),
+      moves: [],
+      backtracking: false
     })
   end
 
   @impl true
   def init(%Bot{} = state) do
-    {:ok, _} = :gen_tcp.connect({94, 45, 241, 27}, 4000, [:binary])
+    {:ok, _} = :gen_tcp.connect('gpn-mazing.v6.rocks', 4000, [:binary, :inet6])
     {:ok, state}
   end
 
   @impl true
   def handle_info({:tcp, port, message}, state) do
-    Logger.info("Received: #{message}" |> String.trim_trailing())
-    handle_message(port, message, state)
+    Logger.info("Received: #{message |> inspect()}" |> String.trim_trailing())
+
+    state =
+      message
+      |> String.split("\n", trim: true)
+      |> Enum.reduce(state, fn msg, acc -> handle_message(port, msg, acc) end)
+
+    {:noreply, state}
   end
 
   defp handle_message(port, <<"motd", _::binary>>, state) do
@@ -32,51 +40,81 @@ defmodule Bot do
     password = Application.get_env(:bot, :password)
     :ok = :gen_tcp.send(port, "join|#{username}|#{password}\n")
     :ok = :gen_tcp.send(port, "chat|FOO!\n")
-    {:noreply, state}
+    state
   end
 
-  defp handle_message(port, <<"pos|", numbers::binary>>, %Bot{dir: dir} = state) do
+  defp handle_message(_, <<"game", _::binary>>, state), do: state
+
+  defp handle_message(port, <<"pos|", numbers::binary>>, %Bot{visited: visited} = state) do
     {pos, walls} = parse_pos(numbers)
 
-    new_dir = next_move(dir, walls)
-    state = %Bot{state | pos: pos, dir: new_dir, walls: walls}
-    Logger.info("Moving #{new_dir}")
-    :ok = :gen_tcp.send(port, "move|#{new_dir}\n")
+    visited = MapSet.put(visited, pos)
+    state = %Bot{state | pos: pos, walls: walls, visited: visited}
 
-    {:noreply, state}
+    move = state |> possible_moves() |> next_move()
+    {state, move} = state |> do_move(move)
+
+    Logger.info(state |> inspect())
+
+    Logger.info("Moving #{move}")
+    :ok = :gen_tcp.send(port, "move|#{move}\n")
+
+    state
   end
 
   defp handle_message(_port, <<"goal|", numbers::binary>>, state) do
     [x, y] = numbers |> String.split("|") |> Enum.map(&to_int/1)
-    {:noreply, %Bot{state | goal: {x, y}}}
+    %Bot{state | goal: {x, y}}
   end
 
+  defp do_move(%Bot{moves: moves} = state, {:ok, move}) do
+    {%Bot{state | moves: [move | moves]}, move}
+  end
+
+  defp do_move(%Bot{moves: [move | rest]} = state, {:error, :stuck}) do
+    {%Bot{state | backtracking: true, moves: rest}, opposite_move(move)}
+  end
+
+  defp opposite_move("up"), do: "down"
+  defp opposite_move("right"), do: "left"
+  defp opposite_move("down"), do: "up"
+  defp opposite_move("left"), do: "right"
+
   defp parse_pos(numbers) do
-    [x, y, n, e, a, d] = numbers |> String.split("|") |> Enum.map(&to_int/1)
+    [x, y, n, e, s, w] = numbers |> String.split("|") |> Enum.map(&to_int/1)
     pos = {x, y}
-    walls = {n != 1, e != 1, a != 1, d != 1}
+    walls = {n != 1, e != 1, s != 1, w != 1}
     {pos, walls}
   end
 
-  defp next_move("up", {_, _, _, true}), do: "left"
-  defp next_move("up", {false, true, _, _}), do: "right"
-  defp next_move("up", {false, _, true, _}), do: "down"
-  defp next_move("up", _), do: "up"
+  @spec next_move(list()) :: {:ok, binary()} | {:error, atom()}
+  defp next_move([]), do: {:error, :stuck}
+  defp next_move([x | _]), do: {:ok, x}
 
-  defp next_move("right", {true, _, _, _}), do: "up"
-  defp next_move("right", {_, false, true, _}), do: "down"
-  defp next_move("right", {_, false, _, true}), do: "left"
-  defp next_move("right", _), do: "right"
-
-  defp next_move("down", {_, true, _, _}), do: "right"
-  defp next_move("down", {_, _, false, true}), do: "left"
-  defp next_move("down", {true, _, false, _}), do: "up"
-  defp next_move("down", _), do: "down"
-
-  defp next_move("left", {_, _, true, _}), do: "down"
-  defp next_move("left", {true, _, _, false}), do: "up"
-  defp next_move("left", {_, true, _, false}), do: "right"
-  defp next_move("left", _), do: "left"
+  @spec possible_moves(%Bot{}) :: list(binary())
+  defp possible_moves(%{
+         pos: {x, y},
+         goal: goal,
+         walls: {north, east, south, west},
+         visited: visited
+       }) do
+    [
+      {{x - 1, y}, west, "left"},
+      {{x, y - 1}, north, "up"},
+      {{x + 1, y}, east, "right"},
+      {{x, y + 1}, south, "down"}
+    ]
+    |> Enum.filter(&elem(&1, 1))
+    |> Enum.sort_by(fn {p, _, _} -> distance_squared(p, goal) end)
+    |> Enum.reject(fn {p, _, _} -> MapSet.member?(visited, p) end)
+    |> Enum.map(&elem(&1, 2))
+  end
 
   defp to_int(s), do: s |> Integer.parse() |> elem(0)
+
+  defp distance_squared({x1, y1}, {x2, y2}) do
+    dx = x1 - x2
+    dy = y1 - y2
+    dx * dx + dy * dy
+  end
 end

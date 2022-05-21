@@ -10,7 +10,7 @@ defmodule Bot.Application do
     children = [
       # Starts a worker by calling: Bot.Worker.start_link(arg)
       # {Bot.Worker, arg}
-      Bot
+      %{id: Bot, start: {Bot, :start_link, [0]}, restart: :permanent}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

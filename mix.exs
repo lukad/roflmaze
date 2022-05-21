@@ -22,7 +22,7 @@ defmodule Bot.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:vector, "~> 1.0.1"}
+      {:vector, "~> 1.0"}
     ]
   end
 end

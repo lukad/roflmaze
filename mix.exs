@@ -7,7 +7,8 @@ defmodule Bot.MixProject do
       version: "0.1.0",
       elixir: "~> 1.13",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      releases: releases()
     ]
   end
 
@@ -16,6 +17,14 @@ defmodule Bot.MixProject do
     [
       extra_applications: [:logger],
       mod: {Bot.Application, []}
+    ]
+  end
+
+  defp releases do
+    [
+      bot: [
+        steps: [:assemble, :tar]
+      ]
     ]
   end
 

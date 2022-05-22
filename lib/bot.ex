@@ -1,23 +1,23 @@
 defmodule Bot do
   use GenServer
 
-  defstruct [:goal, :pos, :walls, :visited, :moves, :backtracking]
-
   require Logger
 
+  defmodule State do
+    defstruct goal: {0, 0},
+              pos: {0, 0},
+              walls: {false, false, false, false},
+              visited: MapSet.new(),
+              moves: [],
+              backtracking: false
+  end
+
   def start_link(_) do
-    GenServer.start_link(__MODULE__, %Bot{
-      goal: {0, 0},
-      pos: {0, 0},
-      walls: {false, false, false, false},
-      visited: MapSet.new(),
-      moves: [],
-      backtracking: false
-    })
+    GenServer.start_link(__MODULE__, %State{})
   end
 
   @impl true
-  def init(%Bot{} = state) do
+  def init(%State{} = state) do
     host = Application.get_env(:bot, :host) |> to_charlist()
     {port, _} = Application.get_env(:bot, :port) |> Integer.parse()
     {:ok, _} = :gen_tcp.connect(host, port, [:binary, :inet6])
@@ -47,11 +47,14 @@ defmodule Bot do
 
   defp handle_message(_, <<"game", _::binary>>, state), do: state
 
-  defp handle_message(port, <<"pos|", numbers::binary>>, %Bot{visited: visited} = state) do
+  defp handle_message(_, <<"win", _::binary>>, _state), do: %State{}
+  defp handle_message(_, <<"lose", _::binary>>, _state), do: %State{}
+
+  defp handle_message(port, <<"pos|", numbers::binary>>, %State{visited: visited} = state) do
     {pos, walls} = parse_pos(numbers)
 
     visited = MapSet.put(visited, pos)
-    state = %Bot{state | pos: pos, walls: walls, visited: visited}
+    state = %State{state | pos: pos, walls: walls, visited: visited}
 
     move = state |> possible_moves() |> next_move()
     {state, move} = state |> do_move(move)
@@ -66,15 +69,15 @@ defmodule Bot do
 
   defp handle_message(_port, <<"goal|", numbers::binary>>, state) do
     [x, y] = numbers |> String.split("|") |> Enum.map(&to_int/1)
-    %Bot{state | goal: {x, y}}
+    %State{state | goal: {x, y}}
   end
 
-  defp do_move(%Bot{moves: moves} = state, {:ok, move}) do
-    {%Bot{state | moves: [move | moves]}, move}
+  defp do_move(%State{moves: moves} = state, {:ok, move}) do
+    {%State{state | moves: [move | moves]}, move}
   end
 
-  defp do_move(%Bot{moves: [move | rest]} = state, {:error, :stuck}) do
-    {%Bot{state | backtracking: true, moves: rest}, opposite_move(move)}
+  defp do_move(%State{moves: [move | rest]} = state, {:error, :stuck}) do
+    {%State{state | backtracking: true, moves: rest}, opposite_move(move)}
   end
 
   defp opposite_move("up"), do: "down"
@@ -93,7 +96,7 @@ defmodule Bot do
   defp next_move([]), do: {:error, :stuck}
   defp next_move([x | _]), do: {:ok, x}
 
-  @spec possible_moves(%Bot{}) :: list(binary())
+  @spec possible_moves(%State{}) :: list(binary())
   defp possible_moves(%{
          pos: {x, y},
          goal: goal,
